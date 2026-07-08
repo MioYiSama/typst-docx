@@ -1,0 +1,25 @@
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+typst-docx = { path = "crates/typst-docx" }
+typst = "0.15"
+typst-library = "0.15"
+typst-layout = "0.15"
+typst-syntax = "0.15"
+typst-kit = { version = "0.15", default-features = false }
+clap = { version = "4.4", features = ["derive", "env", "wrap_help"] }
+codespan-reporting = "0.11"
+ecow = "0.2"
+roxmltree = "0.20"
+ttf-parser = "0.25"
+zip = { version = "8", default-features = false, features = ["deflate"] }
+
+[profile.release]
+lto = "thin"

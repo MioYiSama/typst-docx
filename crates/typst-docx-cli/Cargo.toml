@@ -1,0 +1,25 @@
+[package]
+name = "typst-docx-cli"
+description = "Compile Typst documents into visually faithful DOCX files"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "typst-docx"
+path = "src/main.rs"
+
+[dependencies]
+typst-docx = { workspace = true }
+typst = { workspace = true }
+typst-layout = { workspace = true }
+typst-kit = { workspace = true, features = [
+    "system-files",
+    "system-downloader",
+    "scan-fonts",
+    "embedded-fonts",
+    "emit-diagnostics",
+    "datetime",
+] }
+clap = { workspace = true }
+ecow = { workspace = true }
