@@ -1,2 +1,6 @@
 /target
 .DS_Store
+scripts/.venv
+fixtures/*-ref.pdf
+fixtures/*-lo.pdf
+fixtures/~$*

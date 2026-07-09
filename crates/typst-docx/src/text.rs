@@ -150,10 +150,12 @@ fn whole_fragment(item: &TextItem) -> Frag {
 
 /// Split a text item into exactly positionable fragments.
 ///
-/// Boundaries are inserted after glyphs whose shaped advance deviates from
-/// the font's natural advance (justified spaces, tracking, large kerns) and
-/// around glyphs with vertical or large horizontal offsets, so each fragment
-/// renders faithfully with Word's natural advances.
+/// Word renders each fragment with the font's natural advances, so within a
+/// fragment the deviation between Typst's shaped advances (kerning,
+/// justification, tracking) and the natural advances accumulates as visible
+/// drift. A boundary is inserted as soon as the accumulated deviation
+/// exceeds 0.1pt — the next fragment restarts at the exact cursor position —
+/// and around glyphs with vertical or large horizontal offsets.
 #[allow(unused_assignments, reason = "the closing macro always resets the widths")]
 fn fragments(item: &TextItem) -> Vec<Frag> {
     let size = item.size;
@@ -176,6 +178,8 @@ fn fragments(item: &TextItem) -> Vec<Frag> {
     let mut start_byte = None::<usize>;
     let mut end_byte = 0;
     let mut width_word = Abs::zero();
+    // Accumulated shaped-minus-natural deviation within the fragment.
+    let mut drift = Abs::zero();
 
     macro_rules! close {
         () => {
@@ -188,6 +192,7 @@ fn fragments(item: &TextItem) -> Vec<Frag> {
                     atomic: false,
                 });
                 width_word = Abs::zero();
+                drift = Abs::zero();
             }
         };
     }
@@ -221,10 +226,9 @@ fn fragments(item: &TextItem) -> Vec<Frag> {
         end_byte = range.end;
         width_word += natural;
         cursor += advance;
+        drift += advance - natural;
 
-        if (advance - natural).abs() > Abs::pt(0.2) {
-            // Shaped advance deviates: the next fragment restarts at the
-            // exact cursor position.
+        if drift.abs() > Abs::pt(0.1) {
             close!();
         }
     }
@@ -233,11 +237,21 @@ fn fragments(item: &TextItem) -> Vec<Frag> {
     frags
 }
 
-/// The OS/2 Windows ascent/descent of a font (both positive), with hhea as
-/// a fallback.
+/// The ascent/descent Word uses for baseline placement (both positive).
+///
+/// Word uses the OS/2 Windows metrics, unless the font sets the
+/// USE_TYPO_METRICS bit in `fsSelection`, in which case the typographic
+/// metrics apply. hhea is the last-resort fallback.
 pub fn win_metrics(font: &FontInstance) -> (Em, Em) {
     let ttf = font.ttf();
     if let Some(os2) = ttf.tables().os2 {
+        if os2.use_typographic_metrics() {
+            let ascent = os2.typographic_ascender();
+            let descent = -os2.typographic_descender();
+            if ascent > 0 && descent >= 0 {
+                return (font.to_em(ascent), font.to_em(descent));
+            }
+        }
         let ascent = os2.windows_ascender();
         // `windows_descender` is negated by ttf-parser; flip it back to the
         // spec's positive-down convention.
