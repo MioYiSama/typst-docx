@@ -61,7 +61,22 @@ SVG/PDF/像素图跳过、文本描边丢弃、奇偶填充、虚线相位、RTL
 > 另修复一个 visreg 逼出的真 bug:**片段内累积字距漂移**——原先只在单
 > glyph 偏差 >0.2pt 时拆分,长单词内 <0.2pt 的 kern 会累加(两端对齐行实测
 > 最大 +0.53pt);已改为累积偏差 >0.1pt 即拆分,漂移全局有界(实测降到
-> ≤0.16pt)。3.2.2/3.2.3/3.3/3.4 待做。
+> ≤0.16pt)。
+>
+> **进度(2026-07-09 续)**:P0 收尾。3.2.2(autoSpaceDE/DN=0)、3.2.3
+> (`w:noProof` + `w14:ligatures=none`)、3.4(`emu/twips/twips_ceil` 的
+> `is_finite` 门、页宽 >31680 twips 警告、`w:t` C0 控制字符过滤+警告、
+> 零尺寸/非有限 shape 丢弃)全部落地并测试。visreg 四 fixture 零回归
+> (数值与上批一致),确定性 sha256 复现,CJK+math 导出 XML 良构。
+> **3.3 重要修正认知**:实测 typst **不产生 per-glyph `y_offset`**——
+> 上下标/重音/组合符/阿拉伯文全部走独立平移 TextItem(不同字号),故原
+> `y_offset≠0→atomic` 分支在真实输出中从不触发,plan 描述的"y_offset 框
+> 爆炸"机制不成立。已按 plan 重构 `fragments`(y_offset 相等则合并、仅
+> 大 x_offset 保持 atomic),对现网输出为**正确的 no-op 安全网**(未来字体/
+> typst 若产出 y_offset run 才生效)。真实框数由 TextItem 数 + `render_texts`
+> 段合并决定,**中等而非上千**(实测:单式 9、密集单行 19、四式半页 51),
+> 多 glyph 同基线 run(如 `n+1` 上标)已正确合并为单框。若要进一步降框数,
+> 应改进 `render_texts` 跨 TextItem 合并(与 R10/5.4 锚点上限相关),另行立项。
 
 ### 3.1 视觉回归流水线(最高优先级)
 

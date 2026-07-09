@@ -128,7 +128,9 @@ struct Frag {
     dy: Abs,
     text: EcoString,
     width_word: Abs,
-    /// Whether this fragment must stay alone in its box (offset glyphs).
+    /// Whether this fragment must stay alone in its box (a horizontally
+    /// displaced glyph). Vertically shifted runs are not atomic — they merge
+    /// by their shared `dy` and simply land on a different baseline.
     atomic: bool,
 }
 
@@ -155,7 +157,10 @@ fn whole_fragment(item: &TextItem) -> Frag {
 /// justification, tracking) and the natural advances accumulates as visible
 /// drift. A boundary is inserted as soon as the accumulated deviation
 /// exceeds 0.1pt — the next fragment restarts at the exact cursor position —
-/// and around glyphs with vertical or large horizontal offsets.
+/// and whenever the glyphs' baseline shift (`dy`) changes. Glyphs sharing a
+/// baseline shift merge into one box, so a whole superscript is a single
+/// fragment rather than one atomic box per glyph. Only a glyph with a large
+/// horizontal offset stays atomic (its own box at its exact position).
 #[allow(unused_assignments, reason = "the closing macro always resets the widths")]
 fn fragments(item: &TextItem) -> Vec<Frag> {
     let size = item.size;
@@ -178,6 +183,8 @@ fn fragments(item: &TextItem) -> Vec<Frag> {
     let mut start_byte = None::<usize>;
     let mut end_byte = 0;
     let mut width_word = Abs::zero();
+    // Baseline shift shared by every glyph in the current fragment.
+    let mut cur_dy = Abs::zero();
     // Accumulated shaped-minus-natural deviation within the fragment.
     let mut drift = Abs::zero();
 
@@ -186,7 +193,7 @@ fn fragments(item: &TextItem) -> Vec<Frag> {
             if let Some(start) = start_byte.take() {
                 frags.push(Frag {
                     dx: start_x,
-                    dy: Abs::zero(),
+                    dy: cur_dy,
                     text: item.text[start..end_byte].into(),
                     width_word,
                     atomic: false,
@@ -203,14 +210,16 @@ fn fragments(item: &TextItem) -> Vec<Frag> {
         let x_offset = glyph.x_offset.at(size);
         let y_offset = glyph.y_offset.at(size);
         let range = glyph.range();
+        // Typst's y-offset is y-up; page coordinates are y-down.
+        let dy = -y_offset;
 
-        if y_offset != Abs::zero() || x_offset.abs() > Abs::pt(0.5) {
-            // An offset glyph gets its own box at its exact position.
+        if x_offset.abs() > Abs::pt(0.5) {
+            // A horizontally displaced glyph gets its own box at its exact
+            // position and can never share a run.
             close!();
             frags.push(Frag {
                 dx: cursor + x_offset,
-                // Typst's y-offset is y-up; page coordinates are y-down.
-                dy: -y_offset,
+                dy,
                 text: item.text[range].into(),
                 width_word: natural,
                 atomic: true,
@@ -219,9 +228,15 @@ fn fragments(item: &TextItem) -> Vec<Frag> {
             continue;
         }
 
+        // A change in baseline shift ends the current fragment; consecutive
+        // glyphs sharing one shift (a whole superscript, say) stay in one box.
+        if start_byte.is_some() && dy != cur_dy {
+            close!();
+        }
         if start_byte.is_none() {
             start_x = cursor;
             start_byte = Some(range.start);
+            cur_dy = dy;
         }
         end_byte = range.end;
         width_word += natural;
@@ -391,6 +406,10 @@ fn textbox_shape(
     {
         xml.begin("w:p");
         xml.begin("w:pPr");
+        // Disable Word's automatic 1/8-em spacing at CJK/Latin boundaries,
+        // which would otherwise break the natural-advance placement.
+        xml.begin("w:autoSpaceDE").attr("w:val", 0).end();
+        xml.begin("w:autoSpaceDN").attr("w:val", 0).end();
         xml.begin("w:spacing")
             .attr("w:before", 0)
             .attr("w:after", 0)
@@ -416,6 +435,9 @@ fn textbox_shape(
         if font_ref.italic {
             xml.leaf("w:i");
         }
+        // Silence the spell-check squiggle; it is pure visual noise on a
+        // faithfully positioned run.
+        xml.leaf("w:noProof");
         xml.begin("w:color").attr("w:val", hex6(&color)).end();
         xml.begin("w:kern").attr("w:val", 0).end();
         xml.begin("w:sz").attr("w:val", sz).end();
@@ -426,8 +448,18 @@ fn textbox_shape(
                 .attr("w:eastAsia", &seg.lang)
                 .end();
         }
+        // Stop Word 365 from re-ligating the run and shifting the stepping.
+        // Ignored by pre-2010 Word via the root's `mc:Ignorable="w14"`.
+        xml.begin("w14:ligatures").attr("w14:val", "none").end();
         xml.end();
-        xml.begin("w:t").attr("xml:space", "preserve").text(&seg.text).end();
+        let text = match crate::write::strip_c0_controls(&seg.text) {
+            Some(clean) => {
+                exporter.warn("control characters were removed from text");
+                clean
+            }
+            None => seg.text.to_string(),
+        };
+        xml.begin("w:t").attr("xml:space", "preserve").text(&text).end();
         xml.end();
 
         xml.end();

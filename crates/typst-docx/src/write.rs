@@ -18,18 +18,33 @@ pub const NS_MC: &str = "http://schemas.openxmlformats.org/markup-compatibility/
 pub const NS_W14: &str = "http://schemas.microsoft.com/office/word/2010/wordml";
 
 /// Convert a length to English Metric Units (1 pt = 12700 EMU).
+///
+/// A non-finite length (from a NaN or infinite transform) collapses to 0 so it
+/// cannot produce a garbage coordinate that trips Word's repair dialog.
 pub fn emu(len: Abs) -> i64 {
-    (len.to_pt() * 12700.0).round() as i64
+    let pt = len.to_pt();
+    if !pt.is_finite() {
+        return 0;
+    }
+    (pt * 12700.0).round() as i64
 }
 
 /// Convert a length to twentieths of a point.
 pub fn twips(len: Abs) -> i64 {
-    (len.to_pt() * 20.0).round() as i64
+    let pt = len.to_pt();
+    if !pt.is_finite() {
+        return 0;
+    }
+    (pt * 20.0).round() as i64
 }
 
 /// Convert a length to twips, rounding up.
 pub fn twips_ceil(len: Abs) -> i64 {
-    (len.to_pt() * 20.0).ceil() as i64
+    let pt = len.to_pt();
+    if !pt.is_finite() {
+        return 0;
+    }
+    (pt * 20.0).ceil() as i64
 }
 
 /// Convert a length to half-points (`w:sz` etc.), minimum 1.
@@ -125,6 +140,16 @@ impl Xml {
         debug_assert!(self.stack.is_empty(), "unclosed elements: {:?}", self.stack);
         self.buf
     }
+}
+
+/// Strip C0 control characters (except tab) from `text`.
+///
+/// These characters (`\u{0000}`–`\u{001F}`, tab excepted) are illegal in XML
+/// 1.0 and are a common trigger for Word's repair dialog. Returns `Some` with
+/// the cleaned string only if any character was removed, so callers can warn.
+pub fn strip_c0_controls(text: &str) -> Option<String> {
+    let bad = |c: char| (c as u32) < 0x20 && c != '\t';
+    text.contains(bad).then(|| text.chars().filter(|&c| !bad(c)).collect())
 }
 
 /// Displays text with the five XML special characters escaped.
@@ -245,6 +270,18 @@ mod tests {
         assert_eq!(twips_ceil(Abs::pt(12.541)), 251);
         assert_eq!(half_points(Abs::pt(11.0)), 22);
         assert_eq!(half_points(Abs::pt(0.1)), 1);
+        // Non-finite lengths collapse to zero rather than saturating.
+        assert_eq!(emu(Abs::pt(f64::NAN)), 0);
+        assert_eq!(twips(Abs::pt(f64::INFINITY)), 0);
+        assert_eq!(twips_ceil(Abs::pt(f64::NEG_INFINITY)), 0);
+    }
+
+    #[test]
+    fn control_chars() {
+        assert_eq!(strip_c0_controls("a\u{7}b\tc"), Some("ab\tc".to_string()));
+        assert_eq!(strip_c0_controls("\u{0}\u{1f}"), Some(String::new()));
+        assert_eq!(strip_c0_controls("abc"), None);
+        assert_eq!(strip_c0_controls("tab\tkept"), None);
     }
 
     #[test]

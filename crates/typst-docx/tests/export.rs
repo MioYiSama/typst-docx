@@ -72,13 +72,18 @@ impl World for TestWorld {
     }
 }
 
-/// Compile source and export it as DOCX bytes.
-fn export(text: &str) -> Vec<u8> {
+/// Compile source and export it as a full DOCX output (bytes + warnings).
+fn export_full(text: &str) -> typst_docx::DocxOutput {
     let world = TestWorld::new(text);
     let document = typst::compile::<PagedDocument>(&world)
         .output
         .expect("compilation failed");
-    typst_docx::docx(&document).bytes
+    typst_docx::docx(&document)
+}
+
+/// Compile source and export it as DOCX bytes.
+fn export(text: &str) -> Vec<u8> {
+    export_full(text).bytes
 }
 
 /// Read a part from the DOCX zip as a string.
@@ -209,8 +214,10 @@ fn text_anchor_structure() {
         .filter(|n| n.is_element())
         .map(|n| n.tag_name().name().to_string())
         .collect();
-    let expected =
-        ["rFonts", "b", "i", "color", "kern", "sz", "szCs", "lang"];
+    let expected = [
+        "rFonts", "b", "i", "noProof", "color", "kern", "sz", "szCs", "lang",
+        "ligatures",
+    ];
     let mut last_index = 0;
     for name in &names {
         let index = expected
@@ -313,4 +320,98 @@ fn justified_text_fragments() {
         .filter(|n| n.has_tag_name("txbx"))
         .count();
     assert!(boxes > 3, "expected multiple text boxes, got {boxes}");
+}
+
+#[test]
+fn east_asian_and_ligature_props() {
+    // Mixed CJK/Latin text must disable Word's re-shaping so exact positions
+    // survive: autoSpace off, no re-ligation, no spell-check reflow.
+    let bytes = export("#set page(width: 200pt, height: 100pt, margin: 10pt)\n中文 abc\n");
+    let xml = part(&bytes, "word/document.xml");
+    let doc = parse(&xml);
+
+    // Paragraph properties order autoSpaceDE -> autoSpaceDN -> spacing, both off.
+    let ppr = doc
+        .descendants()
+        .filter(|n| n.has_tag_name("pPr"))
+        .find(|n| n.children().any(|c| c.has_tag_name("autoSpaceDE")))
+        .expect("no pPr with autoSpaceDE");
+    let names: Vec<_> = ppr
+        .children()
+        .filter(|n| n.is_element())
+        .map(|n| n.tag_name().name().to_string())
+        .collect();
+    let de = names.iter().position(|n| n == "autoSpaceDE").unwrap();
+    let dn = names.iter().position(|n| n == "autoSpaceDN").unwrap();
+    let sp = names.iter().position(|n| n == "spacing").unwrap();
+    assert!(de < dn && dn < sp, "pPr order wrong: {names:?}");
+    for tag in ["autoSpaceDE", "autoSpaceDN"] {
+        let node = ppr.children().find(|n| n.has_tag_name(tag)).unwrap();
+        let val = node.attributes().find(|a| a.name() == "val").unwrap().value();
+        assert_eq!(val, "0", "{tag} not disabled");
+    }
+
+    // The run turns off proofing and ligatures.
+    assert!(
+        doc.descendants().any(|n| n.has_tag_name("noProof")),
+        "no w:noProof in run"
+    );
+    let ligatures = doc
+        .descendants()
+        .find(|n| n.has_tag_name("ligatures"))
+        .expect("no w14:ligatures in run");
+    let val = ligatures.attributes().find(|a| a.name() == "val").unwrap().value();
+    assert_eq!(val, "none");
+}
+
+#[test]
+fn math_box_merging() {
+    // A multi-glyph script such as the "n+1" superscript must render as one
+    // merged box, not one anchor per glyph. (Typst positions each script as a
+    // separate translated text run rather than via glyph y-offsets, so the
+    // merging happens in `render_texts`' segment accumulator.)
+    let bytes = export(
+        "#set page(width: 200pt, height: 60pt, margin: 5pt)\n$x^2 + y_i^2 = z^(n+1)$\n",
+    );
+    let xml = part(&bytes, "word/document.xml");
+    let doc = parse(&xml);
+    let texts: Vec<String> = doc
+        .descendants()
+        .filter(|n| n.has_tag_name("txbx"))
+        .map(|b| {
+            b.descendants()
+                .filter(|n| n.has_tag_name("t"))
+                .flat_map(|n| n.text())
+                .collect::<String>()
+        })
+        .collect();
+    // The superscript's three glyphs (n, +, 1) share one box.
+    assert!(
+        texts.iter().any(|t| t.ends_with("+1") && t.chars().count() == 3),
+        "n+1 superscript not merged into one box: {texts:?}"
+    );
+    // The whole line stays well below one box per glyph.
+    assert!(texts.len() <= 9, "too many boxes: {}", texts.len());
+}
+
+#[test]
+fn oversize_page_warns() {
+    // A page wider than Word's 22 inch limit is written as-is with a warning.
+    let out = export_full("#set page(width: 30in, height: 5in)\nHi\n");
+    assert!(
+        out.warnings.iter().any(|w| w.contains("22 inch")),
+        "no oversize-page warning: {:?}",
+        out.warnings
+    );
+    let xml = part(&out.bytes, "word/document.xml");
+    let doc = parse(&xml);
+    let pgsz = doc.descendants().find(|n| n.has_tag_name("pgSz")).unwrap();
+    let w: i64 = pgsz
+        .attributes()
+        .find(|a| a.name() == "w")
+        .unwrap()
+        .value()
+        .parse()
+        .unwrap();
+    assert_eq!(w, 43200, "30in should still be written as 43200 twips");
 }

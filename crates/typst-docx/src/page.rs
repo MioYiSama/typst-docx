@@ -27,6 +27,14 @@ pub fn body(exporter: &mut Exporter, document: &PagedDocument) -> String {
 
     for (index, page) in pages.iter().enumerate() {
         let size = page.frame.size();
+
+        // Word rejects pages larger than 22 inches; write them anyway but flag
+        // that Word may clamp or refuse the size.
+        const MAX_TWIPS: i64 = 31680;
+        if twips(size.x) > MAX_TWIPS || twips(size.y) > MAX_TWIPS {
+            exporter.warn("page size exceeds Word's 22 inch limit; written as-is");
+        }
+
         let mut runs = String::new();
 
         if let Some(paint) = page.fill_or_transparent() {

@@ -19,6 +19,15 @@ pub fn render(exporter: &mut Exporter, placed: &Placed, shape: &Shape) -> String
     let width = bbox.max.x - bbox.min.x;
     let height = bbox.max.y - bbox.min.y;
 
+    // Drop truly degenerate shapes; a thin line keeps one non-zero dimension.
+    if !width.to_pt().is_finite()
+        || !height.to_pt().is_finite()
+        || (width <= Abs::zero() && height <= Abs::zero())
+    {
+        exporter.warn("zero-size or non-finite shape was dropped");
+        return String::new();
+    }
+
     let (x, y, scale, rot) = match frame::classify(placed.transform) {
         Placement::Simple { x, y } => {
             (emu(x + bbox.min.x), emu(y + bbox.min.y), 1.0, None)
