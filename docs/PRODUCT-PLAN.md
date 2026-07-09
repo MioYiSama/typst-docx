@@ -146,7 +146,7 @@ x_offset 超阈值的孤立 glyph。验收:`$x^2 + y_i^2 = z^{n+1}$` 一行 ≤ 
   每个 stop `<a:gs pos="{offset×100000}">` + srgbClr(带 a:alpha),
   `<a:lin ang="{θ}" scaled="1"/>`。角度换算:typst 角度(数学系,起点在渐变方向)
   → DrawingML ST_PositiveFixedAngle(顺时针,自 x 正轴,1/60000 度),
-  `ang = ((90 − deg) mod 360) × 60000` 需用 visreg 定标一次。
+  `ang = deg × 60000`(2026-07-09 visreg 定标)。
 - **径向** `Gradient::Radial` → `<a:gradFill><a:gsLst>…<a:path path="circle">
   <a:fillToRect l/t/r/b/>`,center/radius 换算为相对 bbox 的千分比。
   焦点偏移(focal ≠ center)DrawingML 无法表达 → 警告 + 忽略焦点。
@@ -154,6 +154,15 @@ x_offset 超阈值的孤立 glyph。验收:`$x^2 + y_i^2 = z^{n+1}$` 一行 ≤ 
 - 文本填充为渐变:保持首色标 + 警告(Word 文本渐变要 w14:textFill,收益低)。
 
 验收 fixture:`gradients.typ`(线性 0/45/90°、径向居中/偏心、锥形、带透明度)。
+
+> **进度(2026-07-09)**:4.1 已落地形状填充的 DrawingML 原生线性/径向
+> 渐变。线性写 `<a:gradFill rotWithShape="1">`、`gsLst`、`a:lin scaled="1"`,
+> 角度按 visreg 校准为 `deg × 60000`;
+> 径向写 `a:path path="circle"` + `a:fillToRect`，按 shape 自身 bbox 近似。
+> parent-relative、非默认径向半径、不可表达 focal 参数会警告。锥形渐变、
+> 文本渐变、平铺填充仍保持显式降级，等待 4.3 栅格化兜底。新增
+> `fixtures/gradients.typ` 只覆盖当前应视觉通过的 supported cases，并已加入
+> `scripts/visreg.sh` 默认列表。
 
 ### 4.2 平铺(Tiling)
 

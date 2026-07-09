@@ -281,6 +281,146 @@ fn shapes_and_background() {
 }
 
 #[test]
+fn linear_gradient_shape_fill() {
+    let out = export_full(
+        "#set page(width: 120pt, height: 80pt, margin: 0pt)\n\
+         #place(rect(width: 80pt, height: 40pt, fill: gradient.linear(\
+           (rgb(\"112233\"), 0%),\
+           (rgb(\"44556680\"), 50%),\
+           (rgb(\"778899\"), 100%),\
+           angle: 45deg,\
+         )))\n",
+    );
+    assert!(out.warnings.is_empty(), "unexpected warnings: {:?}", out.warnings);
+
+    let xml = part(&out.bytes, "word/document.xml");
+    let doc = parse(&xml);
+    let grad = doc
+        .descendants()
+        .find(|n| n.has_tag_name("gradFill"))
+        .expect("no gradient fill");
+    assert_eq!(grad.attribute("rotWithShape"), Some("1"));
+
+    let children: Vec<_> = grad
+        .children()
+        .filter(|n| n.is_element())
+        .map(|n| n.tag_name().name().to_string())
+        .collect();
+    assert_eq!(children, ["gsLst", "lin"]);
+
+    let lin = grad.children().find(|n| n.has_tag_name("lin")).unwrap();
+    assert_eq!(lin.attribute("ang"), Some("2700000"));
+    assert_eq!(lin.attribute("scaled"), Some("1"));
+
+    let stops: Vec<_> = grad.descendants().filter(|n| n.has_tag_name("gs")).collect();
+    let positions: Vec<_> = stops.iter().map(|n| n.attribute("pos").unwrap()).collect();
+    assert_eq!(positions, ["0", "50000", "100000"]);
+
+    let colors: Vec<_> = stops
+        .iter()
+        .map(|stop| {
+            stop.descendants()
+                .find(|n| n.has_tag_name("srgbClr"))
+                .unwrap()
+                .attribute("val")
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(colors, ["112233", "445566", "778899"]);
+
+    let alpha = stops[1]
+        .descendants()
+        .find(|n| n.has_tag_name("alpha"))
+        .expect("transparent stop lost alpha");
+    assert_eq!(alpha.attribute("val"), Some("50196"));
+}
+
+#[test]
+fn linear_gradient_angles_use_typst_direction() {
+    let bytes = export(
+        "#set page(width: 160pt, height: 160pt, margin: 0pt)\n\
+         #place(rect(width: 20pt, height: 20pt, fill: gradient.linear(red, blue, angle: 0deg)))\n\
+         #place(dy: 30pt, rect(width: 20pt, height: 20pt, fill: gradient.linear(red, blue, angle: 90deg)))\n\
+         #place(dy: 60pt, rect(width: 20pt, height: 20pt, fill: gradient.linear(red, blue, angle: 180deg)))\n\
+         #place(dy: 90pt, rect(width: 20pt, height: 20pt, fill: gradient.linear(red, blue, angle: 270deg)))\n",
+    );
+
+    let xml = part(&bytes, "word/document.xml");
+    let doc = parse(&xml);
+    let angles: Vec<_> = doc
+        .descendants()
+        .filter(|n| n.has_tag_name("lin"))
+        .map(|n| n.attribute("ang").unwrap())
+        .collect();
+    assert_eq!(angles, ["0", "5400000", "10800000", "16200000"]);
+}
+
+#[test]
+fn radial_gradient_shape_fill() {
+    let out = export_full(
+        "#set page(width: 120pt, height: 80pt, margin: 0pt)\n\
+         #place(rect(width: 80pt, height: 40pt, fill: gradient.radial(\
+           red,\
+           blue,\
+           center: (25%, 75%),\
+         )))\n",
+    );
+    assert!(out.warnings.is_empty(), "unexpected warnings: {:?}", out.warnings);
+
+    let xml = part(&out.bytes, "word/document.xml");
+    let doc = parse(&xml);
+    let grad = doc
+        .descendants()
+        .find(|n| n.has_tag_name("gradFill"))
+        .expect("no gradient fill");
+    assert_eq!(grad.attribute("rotWithShape"), Some("1"));
+
+    let children: Vec<_> = grad
+        .children()
+        .filter(|n| n.is_element())
+        .map(|n| n.tag_name().name().to_string())
+        .collect();
+    assert_eq!(children, ["gsLst", "path"]);
+
+    let path = grad.children().find(|n| n.has_tag_name("path")).unwrap();
+    assert_eq!(path.attribute("path"), Some("circle"));
+    let fill_to = path
+        .children()
+        .find(|n| n.has_tag_name("fillToRect"))
+        .expect("no fillToRect");
+    assert_eq!(fill_to.attribute("l"), Some("25000"));
+    assert_eq!(fill_to.attribute("t"), Some("75000"));
+    assert_eq!(fill_to.attribute("r"), Some("75000"));
+    assert_eq!(fill_to.attribute("b"), Some("25000"));
+}
+
+#[test]
+fn conic_gradient_shape_fill_warns_and_uses_solid_fallback() {
+    let out = export_full(
+        "#set page(width: 120pt, height: 80pt, margin: 0pt)\n\
+         #place(rect(width: 80pt, height: 40pt, fill: gradient.conic(red, blue)))\n",
+    );
+    assert!(
+        out.warnings
+            .iter()
+            .any(|w| w.contains("conic gradients require raster fallback")),
+        "no conic-gradient warning: {:?}",
+        out.warnings
+    );
+
+    let xml = part(&out.bytes, "word/document.xml");
+    let doc = parse(&xml);
+    assert!(
+        doc.descendants().all(|n| !n.has_tag_name("gradFill")),
+        "conic gradient should not emit misleading native gradient OOXML"
+    );
+    assert!(
+        doc.descendants().any(|n| n.has_tag_name("solidFill")),
+        "conic fallback should emit a solid fill"
+    );
+}
+
+#[test]
 fn font_embedding() {
     let bytes = export("Hello\n");
     let table = part(&bytes, "word/fontTable.xml");

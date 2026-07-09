@@ -34,7 +34,7 @@ fi
 cargo build --release -p typst-docx-cli
 
 fixtures=("$@")
-[[ ${#fixtures} -eq 0 ]] && fixtures=(blank calibration shapes images)
+[[ ${#fixtures} -eq 0 ]] && fixtures=(blank calibration shapes images gradients)
 
 out=target/visreg
 mkdir -p $out

@@ -29,16 +29,17 @@ cargo build --release
 - 字体默认嵌入(ODTTF 混淆,ECMA-376 §15.2.13):
   - `fsType` 限制嵌入的字体、TTC 集合会跳过并警告;
   - CFF/可变字体嵌入但给出警告。
-- 不支持(降级 + 警告):渐变/平铺填充(取首个色标/黑色)、裁剪、链接、
-  倾斜或非等比缩放变换(只保留平移)、SVG/PDF/原始像素图片、文本描边、
-  奇偶填充规则、虚线相位。
+- 部分支持形状线性/径向渐变填充;文本渐变、锥形渐变、平铺填充仍会
+  降级并警告(首个色标/黑色)。
+- 不支持(降级 + 警告):裁剪、链接、倾斜或非等比缩放变换(只保留平移)、
+  SVG/PDF/原始像素图片、文本描边、奇偶填充规则、虚线相位。
 
 ## 结构
 
 ```
 crates/typst-docx       导出库:frame 展平 → text/shape/image 绘图对象 → OPC 打包
 crates/typst-docx-cli   瘦 CLI(typst-kit 提供文件/字体/包/诊断)
-fixtures/               验收用例:blank / calibration(基线标定)/ shapes / images
+fixtures/               验收用例:blank / calibration(基线标定)/ shapes / images / gradients
 ```
 
 ## 验收

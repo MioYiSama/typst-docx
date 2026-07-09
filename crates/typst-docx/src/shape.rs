@@ -156,8 +156,7 @@ fn shape_fragment(
                      curve regions may fill differently",
                 );
             }
-            let color = crate::paint::solid(exporter, paint, "shape fill");
-            solid_fill(&mut xml, &color);
+            crate::paint::fill(&mut xml, exporter, paint, "shape fill");
         }
         None => {
             xml.leaf("a:noFill");
